@@ -57,6 +57,7 @@ typedef enum {
 #define TEMP_SEUIL_ALARME 30.0f
 #define WATER_SEUIL_BAS 1000
 #define HUMIDITE_SOL_SEUIL_BAS 2000
+#define LDR_SEUIL_SOMBRE 1000  // Seuil pour détecter l'obscurité
 
 /* USER CODE END PD */
 
@@ -85,6 +86,7 @@ uint32_t last_button_press = 0;
 float current_temperature = 0.0f;
 int current_water_level = 0;
 int current_soil_moisture = 0;
+int current_ldr_value = 0;  // Nouvelle variable pour le LDR
 
 /* USER CODE END PV */
 
@@ -101,6 +103,7 @@ static void MX_I2C1_Init(void);
 float read_temperature_simple(void);
 int read_water_level_simple(void);
 int read_soil_moisture_simple(void);
+int read_ldr_simple(void);  // Nouvelle fonction pour le LDR
 void buzzer_beep_short(void);
 void buzzer_alarme(void);
 void leds_all_off(void);
@@ -165,6 +168,7 @@ int main(void)
   current_temperature = read_temperature_simple();
   current_water_level = read_water_level_simple();
   current_soil_moisture = read_soil_moisture_simple();
+  current_ldr_value = read_ldr_simple();  // Lecture initiale du LDR
 
   HD44780_Clear();
   HD44780_PrintStr("Systeme Pret!");
@@ -637,6 +641,20 @@ int read_soil_moisture_simple(void) {
 }
 
 // ==============================================
+// NOUVELLE FONCTION POUR LDR
+// ==============================================
+
+int read_ldr_simple(void) {
+    uint32_t adc_value = read_adc_simple(ADC_CHANNEL_3);  // PA3 - LDR
+    if (adc_value == 0xFFFFFFFF || adc_value > 4095) {
+        return -999;
+    }
+
+    current_ldr_value = (int)adc_value;
+    return (int)adc_value;
+}
+
+// ==============================================
 // FONCTIONNALITES PRINCIPALES
 // ==============================================
 
@@ -669,6 +687,7 @@ void afficher_normal_mode(void) {
         float temp = read_temperature_simple();
         int water = read_water_level_simple();
         int soil = read_soil_moisture_simple();
+        int ldr = read_ldr_simple();  // Lecture du LDR
 
         // Actions automatiques
         gerer_actions_automatiques(temp, water, soil);
@@ -714,13 +733,26 @@ void afficher_normal_mode(void) {
                 else if (soil > 1500) HD44780_PrintStr("Etat: HUMIDE");
                 else HD44780_PrintStr("Etat: TREMPE");
                 break;
+
+            case 3:  // NOUVEL ÉTAT POUR LDR
+                if (ldr == -999) {
+                    sprintf(msg, "LDR: ERREUR");
+                } else {
+                    sprintf(msg, "LDR: %d", ldr);
+                }
+                HD44780_Clear();
+                HD44780_PrintStr(msg);
+                HD44780_SetCursor(0,1);
+                if (ldr < LDR_SEUIL_SOMBRE) HD44780_PrintStr("Lumière: CLAIR");
+                else HD44780_PrintStr("Lumière: SOMBRE");
+                break;
         }
 
-        display_state = (display_state + 1) % 3;
+        display_state = (display_state + 1) % 4;  // Changé à 4 états
     }
 }
 
-// DIAGNOSTIC COMPLET
+// DIAGNOSTIC COMPLET AVEC LDR
 void diagnostic_complet(void) {
     char msg[17];
     uint8_t errors = 0;
@@ -736,8 +768,9 @@ void diagnostic_complet(void) {
     float temp = read_temperature_simple();
     int water = read_water_level_simple();
     int soil = read_soil_moisture_simple();
+    int ldr = read_ldr_simple();  // Test du LDR
 
-    // Affichage résultats capteurs
+    // Affichage résultats capteurs - PREMIÈRE LIGNE
     HD44780_Clear();
     if (temp == -999.0f) {
         HD44780_PrintStr("T:ERREUR ");
@@ -755,6 +788,7 @@ void diagnostic_complet(void) {
         HD44780_PrintStr(msg);
     }
 
+    // DEUXIÈME LIGNE - SOL ET LDR
     HD44780_SetCursor(0,1);
     if (soil == -999) {
         HD44780_PrintStr("S:ERREUR ");
@@ -764,13 +798,37 @@ void diagnostic_complet(void) {
         HD44780_PrintStr(msg);
     }
 
-    // Vérification alertes
-    if (temp > TEMP_SEUIL_ALARME && temp != -999.0f) alertes++;
-    if (water < WATER_SEUIL_BAS && water != -999) alertes++;
+    if (ldr == -999) {
+        HD44780_PrintStr("L:ERREUR");
+        errors++;
+    } else {
+        sprintf(msg, "L:%d", ldr);
+        HD44780_PrintStr(msg);
+    }
 
-    if (errors > 0) HD44780_PrintStr("ERR");
-    else if (alertes > 0) HD44780_PrintStr("ALRT");
-    else HD44780_PrintStr("OK");
+    HAL_Delay(2000);
+
+    // Affichage des états des capteurs
+    HD44780_Clear();
+    HD44780_PrintStr("Etats capteurs:");
+    HD44780_SetCursor(0,1);
+
+    if (temp != -999.0f && temp > TEMP_SEUIL_ALARME) {
+        HD44780_PrintStr("TEMP! ");
+        alertes++;
+    }
+    if (water != -999 && water < WATER_SEUIL_BAS) {
+        HD44780_PrintStr("EAU! ");
+        alertes++;
+    }
+    if (ldr != -999 && ldr > LDR_SEUIL_SOMBRE) {
+        HD44780_PrintStr("SOMBRE");
+        alertes++;
+    }
+
+    if (alertes == 0) {
+        HD44780_PrintStr("NORMAL");
+    }
 
     HAL_Delay(2000);
 
